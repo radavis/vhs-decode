@@ -1,35 +1,53 @@
-# known to work with 22.10, other versions may have incompatibilities
-FROM ubuntu:22.10 as builder
-
-RUN apt-get update
-
+FROM ubuntu:24.04 as builder
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt -y -qq upgrade && \
-apt -y -qq install --no-install-recommends make cmake python3 git qt6-base-dev libfftw3-dev openssl pv pkg-config python3-setuptools libqt5core5a ca-certificates python3-pip wget xz-utils python3-dev build-essential && apt-get clean
+RUN apt update && apt -y -qq upgrade
+RUN apt -y -qq install \
+  build-essential make cmake git pv pkg-config  \
+  wget curl xz-utils  \
+  openssl ca-certificates
 
-# clone and build the latest master
-RUN git clone --depth 2 https://github.com/oyvindln/vhs-decode.git
+RUN apt -y -qq install \
+  libfftw3-bin libfftw3-dev
 
-RUN cd vhs-decode && mkdir build2 && cd build2 && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_QWT=OFF -DBUILD_PYTHON=OFF -DBUILD_LDF_READER=OFF && make && make install
+RUN apt -y -qq install \
+  python3 python3-dev python3-setuptools python3-venv pipx
+
+RUN apt -y -qq install \
+  qt6-base-dev libqt5core5a \
+  && apt clean
+
+RUN git clone --depth 1 --branch v0.3.3 https://github.com/oyvindln/vhs-decode.git && \
+  cd vhs-decode
+
 WORKDIR /vhs-decode
-# Installing python deps via pip seemed to take up less space (though may have to be vary of versioning)
-RUN pip install --user numpy scipy numba cython && \
-pip install --user . && \
-pip cache purge
+# Copy the current requirements.txt into this 'builder' container
+COPY requirements.txt ./
+RUN pipx install .
 
-# Install ffmpeg static to avoid draggin in tons of deps
-RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O - | tar Jxvf - --wildcards --strip-components=1 ffmpeg-*-amd64-static/ffmpeg && cp ffmpeg /usr/local/bin/
+RUN mkdir build2 && cd build2 && \
+  cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_QWT=OFF -DBUILD_PYTHON=OFF -DBUILD_LDF_READER=OFF && \
+  make && make install
 
-FROM ubuntu:22.10
-ARG DEBIAN_FRONTEND=noninteractive
+# Install tbc-video-export
+RUN pipx install https://github.com/JuniorIsAJitterbug/tbc-video-export/releases/download/v0.1.5/tbc_video_export-0.1.5.tar.gz
 
-RUN apt-get -qq update && \
-apt -y -qq upgrade && \ 
-apt -y -qq install --no-install-recommends --autoremove libqt6core6 libfftw3-3 python3 && \
-apt-get clean && \
-rm -rf /var/lib/apt/lists/*
-# Copy binaries and python bits from build image
-COPY --from=0 /usr/local/bin/* /usr/local/bin/
-COPY --from=0 /root/.local /root/.local/
+# Install a ffmpeg static build
+RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O - | \
+  tar Jxvf - --wildcards --strip-components=1 ffmpeg-*-amd64-static/ffmpeg && \
+  cp ffmpeg /usr/local/bin/
+
+# todo: copy flac v1.5.0 into container
+
+# FROM ubuntu:24.04
+# ARG DEBIAN_FRONTEND=noninteractive
+
+# RUN apt-get -qq update && \
+#   apt -y -qq upgrade && \
+#   apt -y -qq install --autoremove libqt6core6 libfftw3-3 python3 && \
+#   apt-get clean && \
+#   rm -rf /var/lib/apt/lists/*
+# # Copy binaries and python bits from build image
+# COPY --from=builder /usr/local/bin/* /usr/local/bin/
+# COPY --from=builder /root/.local /root/.local/
 ENV PATH=/root/.local/bin:$PATH
 CMD ["/bin/bash"]
